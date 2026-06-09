@@ -1,0 +1,41 @@
+import { create } from "zustand";
+import { invoke } from "@tauri-apps/api/core";
+
+export interface Contest {
+  id: number;
+  name: string;
+  platform: string;
+  startTime: string;
+  durationSeconds: number;
+  url: string;
+}
+
+interface ContestState {
+  contests: Contest[];
+  isLoading: boolean;
+  error: string | null;
+  fetchContests: () => Promise<void>;
+}
+
+export const useContestStore = create<ContestState>((set) => ({
+  contests: [],
+  isLoading: false,
+  error: null,
+  fetchContests: async () => {
+    set({ isLoading: true, error: null });
+    try {
+      // Call the Rust backend function
+      const data = await invoke<Contest[]>("fetch_contests");
+      set({ contests: data, isLoading: false });
+    } catch (err: any) {
+      console.error("Failed to fetch contests:", err);
+      // Fallback: try fetching cached contests if fetch_contests fails fully
+      try {
+        const cached = await invoke<Contest[]>("get_cached_contests");
+        set({ contests: cached, isLoading: false, error: err.toString() });
+      } catch (cacheErr) {
+        set({ error: err.toString(), isLoading: false });
+      }
+    }
+  },
+}));
