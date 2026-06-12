@@ -18,7 +18,12 @@ async fn fetch_contests(state: State<'_, AppState>) -> Result<Vec<Contest>, Stri
     let (api_key, username) = {
         let conn = state.db.lock().unwrap();
         match get_config(&conn) {
-            Ok(Some(config)) => (config.api_key, config.username),
+            Ok(Some(config)) => {
+                if config.api_key.trim().is_empty() || config.username.trim().is_empty() {
+                    return Err("API_KEY_MISSING".to_string());
+                }
+                (config.api_key, config.username)
+            },
             _ => return Err("API_KEY_MISSING".to_string()),
         }
     };

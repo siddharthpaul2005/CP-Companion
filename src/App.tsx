@@ -19,6 +19,7 @@ function App() {
   const [username, setUsername] = useState("");
   const [apiKey, setApiKey] = useState("");
   const [saveSuccess, setSaveSuccess] = useState(false);
+  const [dismissConfigModal, setDismissConfigModal] = useState(false);
 
   useEffect(() => {
     // Determine which window we are rendering
@@ -85,6 +86,17 @@ function App() {
     }
   };
 
+  const handleClearConfig = async () => {
+    try {
+      await invoke("save_api_config", { username: "", apiKey: "" });
+      setUsername("");
+      setApiKey("");
+      fetchContests(); // Refetch to reset state
+    } catch (e) {
+      console.error("Failed to clear config:", e);
+    }
+  };
+
   if (windowLabel === "widget") {
     return <RainmeterWidget />;
   }
@@ -136,10 +148,43 @@ function App() {
 
         {/* Content Area */}
         <main className="flex-1 overflow-y-auto custom-scrollbar flex flex-col relative">
-          {needsConfig && view !== "settings" && (
-            <div className="bg-blue-500/10 border border-blue-500/20 text-blue-400 p-3 m-3 rounded-lg text-sm flex items-center justify-between">
-              <span>Please configure your Clist API credentials in Settings to fetch upcoming contests.</span>
-              <button onClick={() => setView("settings")} className="text-xs bg-blue-500/20 hover:bg-blue-500/30 px-3 py-1.5 rounded transition-colors">Go to Settings</button>
+          {needsConfig && !dismissConfigModal && (
+            <div className="absolute inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+              <div className="bg-[#1a1a1a] border border-white/10 rounded-xl p-5 w-full max-w-sm shadow-2xl flex flex-col gap-3 relative">
+                <button 
+                  onClick={() => setDismissConfigModal(true)} 
+                  className="absolute top-3 right-3 p-1 text-white/40 hover:text-white/90 hover:bg-white/10 rounded-md transition-colors"
+                  title="Close"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+                <div>
+                  <h2 className="text-lg font-bold text-white mb-1">Welcome to CP Companion</h2>
+                  <p className="text-sm text-white/70">Please configure your Clist API credentials to fetch upcoming contests.</p>
+                </div>
+                
+                <div>
+                  <label className="text-xs text-white/60 block mb-1">Clist Username</label>
+                  <input type="text" value={username} onChange={e => setUsername(e.target.value)} className="w-full bg-black/20 border border-white/10 rounded p-2 text-sm text-white focus:border-blue-500 outline-none transition-colors" placeholder="e.g. tournist" />
+                </div>
+                <div>
+                  <label className="text-xs text-white/60 block mb-1">Clist API Key</label>
+                  <input type="password" value={apiKey} onChange={e => setApiKey(e.target.value)} className="w-full bg-black/20 border border-white/10 rounded p-2 text-sm text-white focus:border-blue-500 outline-none transition-colors" placeholder="Enter API Key" />
+                </div>
+                
+                <button onClick={handleSaveConfig} className={`w-full text-sm py-2 rounded transition-colors ${saveSuccess ? 'bg-green-500/20 text-green-400' : 'bg-blue-600 hover:bg-blue-700 text-white'}`}>
+                  {saveSuccess ? "Saved successfully!" : "Save Configuration"}
+                </button>
+
+                <div className="mt-2 pt-4 border-t border-white/10">
+                  <h3 className="text-xs font-semibold text-white/80 mb-2">How to get your API Key:</h3>
+                  <ol className="text-xs text-white/60 space-y-1.5 list-decimal list-inside">
+                    <li>Create an account at <a href="https://clist.by" target="_blank" rel="noreferrer" className="text-blue-400 hover:text-blue-300 hover:underline">clist.by</a></li>
+                    <li>Log in and go to the <a href="https://clist.by/api/v4/doc/" target="_blank" rel="noreferrer" className="text-blue-400 hover:text-blue-300 hover:underline">API Documentation page</a></li>
+                    <li>Copy your username and click "Authorization" to get your API Key.</li>
+                  </ol>
+                </div>
+              </div>
             </div>
           )}
           {view === "widget" && <div className="p-3"><WidgetView /></div>}
@@ -178,9 +223,23 @@ function App() {
                 <label className="text-xs text-white/60 block mt-4 mb-1">Clist API Key</label>
                 <input type="password" value={apiKey} onChange={e => setApiKey(e.target.value)} className="w-full bg-black/20 border border-white/10 rounded p-2 text-sm text-white focus:border-blue-500 outline-none transition-colors" placeholder="Enter API Key" />
                 
-                <button onClick={handleSaveConfig} className={`mt-4 w-full text-sm py-2 rounded transition-colors ${saveSuccess ? 'bg-green-500/20 text-green-400' : 'bg-white/10 hover:bg-white/20 text-white'}`}>
-                  {saveSuccess ? "Saved successfully!" : "Save Configuration"}
-                </button>
+                <div className="mt-4 pt-4 border-t border-white/10">
+                  <h3 className="text-xs font-semibold text-white/80 mb-2">How to get your API Key:</h3>
+                  <ol className="text-xs text-white/60 space-y-1.5 list-decimal list-inside">
+                    <li>Create an account at <a href="https://clist.by" target="_blank" rel="noreferrer" className="text-blue-400 hover:text-blue-300 hover:underline">clist.by</a></li>
+                    <li>Log in and go to the <a href="https://clist.by/api/v4/doc/" target="_blank" rel="noreferrer" className="text-blue-400 hover:text-blue-300 hover:underline">API Documentation page</a></li>
+                    <li>Copy your username and click "Authorization" to get your API Key.</li>
+                  </ol>
+                </div>
+
+                <div className="flex gap-2 mt-4">
+                  <button onClick={handleSaveConfig} className={`flex-1 text-sm py-2 rounded transition-colors ${saveSuccess ? 'bg-green-500/20 text-green-400' : 'bg-white/10 hover:bg-white/20 text-white'}`}>
+                    {saveSuccess ? "Saved successfully!" : "Save Configuration"}
+                  </button>
+                  <button onClick={handleClearConfig} className="text-sm py-2 px-4 rounded transition-colors bg-red-500/10 hover:bg-red-500/20 text-red-400" title="Remove Configuration">
+                    Remove
+                  </button>
+                </div>
               </div>
             </div>
           )}

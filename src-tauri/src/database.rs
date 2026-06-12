@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 #[serde(rename_all = "camelCase")]
 pub struct Contest {
     pub id: i64,
-    pub name: string_or_number,
+    pub name: StringOrNumber,
     pub platform: String,
     pub start_time: String,
     pub duration_seconds: i64,
@@ -20,7 +20,7 @@ pub struct AppConfig {
 }
 
 // Temporary workaround for clist API sometimes sending ints as names (rare but possible)
-type string_or_number = String;
+type StringOrNumber = String;
 
 pub fn init_db(db_path: &std::path::Path) -> Result<Connection> {
     let conn = Connection::open(db_path)?;
