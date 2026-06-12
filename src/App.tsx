@@ -10,6 +10,15 @@ import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { enable, isEnabled, disable } from '@tauri-apps/plugin-autostart';
 import "./App.css";
 
+const SUPPORTED_PLATFORMS = [
+  { id: "codeforces.com", name: "Codeforces" },
+  { id: "leetcode.com", name: "LeetCode" },
+  { id: "atcoder.jp", name: "AtCoder" },
+  { id: "codechef.com", name: "CodeChef" },
+  { id: "geeksforgeeks.org", name: "GeeksforGeeks" },
+  { id: "hackerrank.com", name: "HackerRank" }
+];
+
 function App() {
   const [view, setView] = useState<"widget" | "calendar" | "settings">("widget");
   const [windowLabel, setWindowLabel] = useState<string | null>(null);
@@ -19,6 +28,12 @@ function App() {
   const [username, setUsername] = useState("");
   const [apiKey, setApiKey] = useState("");
   const [saveSuccess, setSaveSuccess] = useState(false);
+  const [dismissConfigModal, setDismissConfigModal] = useState(false);
+  const [availablePlatforms, setAvailablePlatforms] = useState<{id: string, name: string}[]>(SUPPORTED_PLATFORMS);
+  const [platformSearchQuery, setPlatformSearchQuery] = useState("");
+  const [selectedPlatforms, setSelectedPlatforms] = useState<string[]>(
+    SUPPORTED_PLATFORMS.map(p => p.id)
+  );
 
   useEffect(() => {
     // Determine which window we are rendering
@@ -33,8 +48,34 @@ function App() {
             setAutostartEnabled(autoStartStatus);
             const config: any = await invoke("get_api_config");
             if (config) {
-              setUsername(config.username);
-              setApiKey(config.api_key);
+              setUsername(config.username || "");
+              const currentApiKey = config.apiKey || config.api_key || "";
+              setApiKey(currentApiKey);
+              
+              if (config.platforms && Array.isArray(config.platforms)) {
+                setSelectedPlatforms(config.platforms);
+              }
+              if (config.username && currentApiKey) {
+                try {
+                  const platforms: any[] = await invoke("get_available_platforms");
+                  if (platforms && platforms.length > 0) {
+                    const formatted = platforms.map(p => ({ 
+                      id: p.name, 
+                      name: p.name.split('.')[0].replace(/^\w/, (c: string) => c.toUpperCase()) 
+                    }));
+                    formatted.sort((a, b) => {
+                      const aSel = config.platforms?.includes(a.id);
+                      const bSel = config.platforms?.includes(b.id);
+                      if (aSel && !bSel) return -1;
+                      if (!aSel && bSel) return 1;
+                      return a.name.localeCompare(b.name);
+                    });
+                    setAvailablePlatforms(formatted);
+                  }
+                } catch (e) {
+                  console.error("Failed to fetch dynamic platforms:", e);
+                }
+              }
             }
           } catch (err) {
             console.error("Failed to load settings", err);
@@ -76,12 +117,91 @@ function App() {
   const handleSaveConfig = async () => {
     setSaveSuccess(false);
     try {
-      await invoke("save_api_config", { username, apiKey });
+      await invoke("save_api_config", { username, apiKey, platforms: selectedPlatforms });
       setSaveSuccess(true);
       setTimeout(() => setSaveSuccess(false), 3000);
       fetchContests(); // Refetch with new credentials
     } catch (e) {
       console.error("Failed to save config:", e);
+    }
+  };
+
+  const handleClearConfig = async () => {
+    try {
+      await invoke("save_api_config", { username: "", apiKey: "", platforms: SUPPORTED_PLATFORMS.map(p => p.id) });
+      setUsername("");
+      setApiKey("");
+      setSelectedPlatforms(SUPPORTED_PLATFORMS.map(p => p.id));
+      fetchContests(); // Refetch to reset state
+    } catch (e) {
+      console.error("Failed to clear config:", e);
+    }
+  };
+
+  const togglePlatform = async (platformId: string) => {
+    const newPlatforms = selectedPlatforms.includes(platformId)
+      ? selectedPlatforms.filter((id) => id !== platformId)
+      : [...selectedPlatforms, platformId];
+    
+    setSelectedPlatforms(newPlatforms);
+    
+    // Auto-save if they have API credentials configured
+    if (username && apiKey) {
+      try {
+        await invoke("save_api_config", { username, apiKey, platforms: newPlatforms });
+        fetchContests();
+      } catch (e) {
+        console.error("Failed to save platforms:", e);
+      }
+    }
+  };
+
+  const filteredPlatforms = availablePlatforms.filter(p => 
+    p.name.toLowerCase().includes(platformSearchQuery.toLowerCase()) || 
+    p.id.toLowerCase().includes(platformSearchQuery.toLowerCase())
+  ).sort((a, b) => {
+    const aSel = selectedPlatforms.includes(a.id);
+    const bSel = selectedPlatforms.includes(b.id);
+    if (aSel && !bSel) return -1;
+    if (!aSel && bSel) return 1;
+
+    const aPop = SUPPORTED_PLATFORMS.findIndex(p => p.id === a.id);
+    const bPop = SUPPORTED_PLATFORMS.findIndex(p => p.id === b.id);
+    const aIsPop = aPop !== -1;
+    const bIsPop = bPop !== -1;
+
+    if (aIsPop && !bIsPop) return -1;
+    if (!aIsPop && bIsPop) return 1;
+    if (aIsPop && bIsPop) return aPop - bPop;
+
+    return a.name.localeCompare(b.name);
+  });
+
+  const selectAll = async () => {
+    const allIds = filteredPlatforms.map(p => p.id);
+    const newPlatforms = Array.from(new Set([...selectedPlatforms, ...allIds]));
+    setSelectedPlatforms(newPlatforms);
+    if (username && apiKey) {
+      try {
+        await invoke("save_api_config", { username, apiKey, platforms: newPlatforms });
+        fetchContests();
+      } catch (e) {
+        console.error("Failed to save platforms:", e);
+      }
+    }
+  };
+
+  const unselectAll = async () => {
+    const filteredIds = new Set(filteredPlatforms.map(p => p.id));
+    const newPlatforms = selectedPlatforms.filter(id => !filteredIds.has(id));
+    setSelectedPlatforms(newPlatforms);
+    if (username && apiKey) {
+      try {
+        await invoke("save_api_config", { username, apiKey, platforms: newPlatforms });
+        fetchContests();
+      } catch (e) {
+        console.error("Failed to save platforms:", e);
+      }
     }
   };
 
@@ -136,10 +256,43 @@ function App() {
 
         {/* Content Area */}
         <main className="flex-1 overflow-y-auto custom-scrollbar flex flex-col relative">
-          {needsConfig && view !== "settings" && (
-            <div className="bg-blue-500/10 border border-blue-500/20 text-blue-400 p-3 m-3 rounded-lg text-sm flex items-center justify-between">
-              <span>Please configure your Clist API credentials in Settings to fetch upcoming contests.</span>
-              <button onClick={() => setView("settings")} className="text-xs bg-blue-500/20 hover:bg-blue-500/30 px-3 py-1.5 rounded transition-colors">Go to Settings</button>
+          {needsConfig && !dismissConfigModal && (
+            <div className="absolute inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+              <div className="bg-[#1a1a1a] border border-white/10 rounded-xl p-5 w-full max-w-sm shadow-2xl flex flex-col gap-3 relative">
+                <button 
+                  onClick={() => setDismissConfigModal(true)} 
+                  className="absolute top-3 right-3 p-1 text-white/40 hover:text-white/90 hover:bg-white/10 rounded-md transition-colors"
+                  title="Close"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+                <div>
+                  <h2 className="text-lg font-bold text-white mb-1">Welcome to CP Companion</h2>
+                  <p className="text-sm text-white/70">Please configure your Clist API credentials to fetch upcoming contests.</p>
+                </div>
+                
+                <div>
+                  <label className="text-xs text-white/60 block mb-1">Clist Username</label>
+                  <input type="text" value={username} onChange={e => setUsername(e.target.value)} className="w-full bg-black/20 border border-white/10 rounded p-2 text-sm text-white focus:border-blue-500 outline-none transition-colors" placeholder="e.g. tournist" />
+                </div>
+                <div>
+                  <label className="text-xs text-white/60 block mb-1">Clist API Key</label>
+                  <input type="password" value={apiKey} onChange={e => setApiKey(e.target.value)} className="w-full bg-black/20 border border-white/10 rounded p-2 text-sm text-white focus:border-blue-500 outline-none transition-colors" placeholder="Enter API Key" />
+                </div>
+                
+                <button onClick={handleSaveConfig} className={`w-full text-sm py-2 rounded transition-colors ${saveSuccess ? 'bg-green-500/20 text-green-400' : 'bg-blue-600 hover:bg-blue-700 text-white'}`}>
+                  {saveSuccess ? "Saved successfully!" : "Save Configuration"}
+                </button>
+
+                <div className="mt-2 pt-4 border-t border-white/10">
+                  <h3 className="text-xs font-semibold text-white/80 mb-2">How to get your API Key:</h3>
+                  <ol className="text-xs text-white/60 space-y-1.5 list-decimal list-inside">
+                    <li>Create an account at <a href="https://clist.by" target="_blank" rel="noreferrer" className="text-blue-400 hover:text-blue-300 hover:underline">clist.by</a></li>
+                    <li>Log in and go to the <a href="https://clist.by/api/v4/doc/" target="_blank" rel="noreferrer" className="text-blue-400 hover:text-blue-300 hover:underline">API Documentation page</a></li>
+                    <li>Copy your username and click "Authorization" to get your API Key.</li>
+                  </ol>
+                </div>
+              </div>
             </div>
           )}
           {view === "widget" && <div className="p-3"><WidgetView /></div>}
@@ -178,9 +331,70 @@ function App() {
                 <label className="text-xs text-white/60 block mt-4 mb-1">Clist API Key</label>
                 <input type="password" value={apiKey} onChange={e => setApiKey(e.target.value)} className="w-full bg-black/20 border border-white/10 rounded p-2 text-sm text-white focus:border-blue-500 outline-none transition-colors" placeholder="Enter API Key" />
                 
-                <button onClick={handleSaveConfig} className={`mt-4 w-full text-sm py-2 rounded transition-colors ${saveSuccess ? 'bg-green-500/20 text-green-400' : 'bg-white/10 hover:bg-white/20 text-white'}`}>
-                  {saveSuccess ? "Saved successfully!" : "Save Configuration"}
-                </button>
+                <div className="mt-4 pt-4 border-t border-white/10">
+                  <h3 className="text-xs font-semibold text-white/80 mb-2">How to get your API Key:</h3>
+                  <ol className="text-xs text-white/60 space-y-1.5 list-decimal list-inside">
+                    <li>Create an account at <a href="https://clist.by" target="_blank" rel="noreferrer" className="text-blue-400 hover:text-blue-300 hover:underline">clist.by</a></li>
+                    <li>Log in and go to the <a href="https://clist.by/api/v4/doc/" target="_blank" rel="noreferrer" className="text-blue-400 hover:text-blue-300 hover:underline">API Documentation page</a></li>
+                    <li>Copy your username and click "Authorization" to get your API Key.</li>
+                  </ol>
+                </div>
+                <div className="flex gap-2 mt-6">
+                  <button onClick={handleSaveConfig} className={`flex-1 text-sm py-2 rounded transition-colors ${saveSuccess ? 'bg-green-500/20 text-green-400' : 'bg-white/10 hover:bg-white/20 text-white'}`}>
+                    {saveSuccess ? "Saved successfully!" : "Save Configuration"}
+                  </button>
+                  <button onClick={handleClearConfig} className="text-sm py-2 px-4 rounded transition-colors bg-red-500/10 hover:bg-red-500/20 text-red-400" title="Remove Configuration">
+                    Remove
+                  </button>
+                </div>
+              </div>
+
+              <div className="bg-white/5 border border-white/10 rounded-xl p-4 flex flex-col min-h-[300px]">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-xs font-semibold text-white/70 uppercase tracking-widest">Preferred Platforms</h3>
+                  <div className="flex gap-2">
+                    <button onClick={selectAll} className="text-[10px] bg-white/5 hover:bg-white/10 border border-white/5 text-white/70 px-2 py-1 rounded transition-colors">Select All</button>
+                    <button onClick={unselectAll} className="text-[10px] bg-white/5 hover:bg-white/10 border border-white/5 text-white/70 px-2 py-1 rounded transition-colors">Clear All</button>
+                  </div>
+                </div>
+                <input 
+                  type="text"
+                  placeholder="Search platforms..."
+                  value={platformSearchQuery}
+                  onChange={e => setPlatformSearchQuery(e.target.value)}
+                  className="w-full bg-black/20 border border-white/10 rounded p-2 text-sm text-white focus:border-blue-500 outline-none transition-colors mb-3"
+                />
+                <div className="grid grid-cols-2 gap-3 max-h-60 overflow-y-auto custom-scrollbar pr-1 flex-1">
+                  {filteredPlatforms.map(platform => (
+                    <label key={platform.id} className="flex items-center gap-2.5 cursor-pointer group bg-black/20 hover:bg-black/40 p-2 rounded-lg border border-white/5 hover:border-white/10 transition-all">
+                      <div className={`w-4 h-4 rounded border flex items-center justify-center transition-colors shrink-0 ${selectedPlatforms.includes(platform.id) ? 'bg-blue-500 border-blue-500' : 'border-white/20 group-hover:border-white/40 bg-black/40'}`}>
+                        {selectedPlatforms.includes(platform.id) && <svg className="w-2.5 h-2.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>}
+                      </div>
+                      <input 
+                        type="checkbox" 
+                        className="hidden" 
+                        checked={selectedPlatforms.includes(platform.id)}
+                        onChange={() => togglePlatform(platform.id)}
+                      />
+                      <img 
+                        src={`https://www.google.com/s2/favicons?domain=${platform.id}&sz=64`} 
+                        alt={platform.name} 
+                        className="w-4 h-4 rounded-sm object-contain"
+                        onError={(e) => {
+                          e.currentTarget.onerror = null; // Prevent infinite loop
+                          e.currentTarget.src = 'https://www.google.com/s2/favicons?domain=example.com&sz=64';
+                          e.currentTarget.style.opacity = '0.5';
+                        }}
+                      />
+                      <span className="text-sm text-white/70 group-hover:text-white transition-colors truncate">{platform.name}</span>
+                    </label>
+                  ))}
+                  {filteredPlatforms.length === 0 && (
+                    <div className="col-span-2 text-center py-4 text-white/40 text-sm">
+                      No platforms found.
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
           )}
