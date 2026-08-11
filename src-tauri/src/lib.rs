@@ -102,6 +102,84 @@ async fn get_available_platforms(state: State<'_, AppState>) -> Result<Vec<clist
     clist::fetch_available_platforms(&api_key, &username).await.map_err(|e| e.to_string())
 }
 
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct UpdateInfo {
+    available: bool,
+    latest_version: String,
+    download_url: String,
+}
+
+fn parse_version(v: &str) -> Vec<u64> {
+    let stripped = v.strip_prefix('v').unwrap_or(v);
+    stripped
+        .split('.')
+        .filter_map(|s| s.parse::<u64>().ok())
+        .collect()
+}
+
+fn is_newer(latest: &str, current: &str) -> bool {
+    let l = parse_version(latest);
+    let c = parse_version(current);
+    // Compare component by component; missing components treated as 0
+    let max_len = l.len().max(c.len());
+    for i in 0..max_len {
+        let lv = l.get(i).copied().unwrap_or(0);
+        let cv = c.get(i).copied().unwrap_or(0);
+        if lv > cv {
+            return true;
+        }
+        if lv < cv {
+            return false;
+        }
+    }
+    false
+}
+
+#[tauri::command]
+async fn check_for_updates() -> Result<UpdateInfo, String> {
+    let current_version = env!("CARGO_PKG_VERSION");
+
+    let client = reqwest::Client::builder()
+        .user_agent("cp-companion-update-checker")
+        .build()
+        .map_err(|e| e.to_string())?;
+
+    let resp: serde_json::Value = client
+        .get("https://api.github.com/repos/IamMradul/CP-Companion/releases/latest")
+        .send()
+        .await
+        .map_err(|e| format!("Failed to check for updates: {}", e))?
+        .json()
+        .await
+        .map_err(|e| format!("Failed to parse update response: {}", e))?;
+
+    let tag_name = resp["tag_name"]
+        .as_str()
+        .unwrap_or("")
+        .to_string();
+    let html_url = resp["html_url"]
+        .as_str()
+        .unwrap_or("https://github.com/IamMradul/CP-Companion/releases")
+        .to_string();
+
+    if tag_name.is_empty() {
+        return Ok(UpdateInfo {
+            available: false,
+            latest_version: current_version.to_string(),
+            download_url: String::new(),
+        });
+    }
+
+    let available = is_newer(&tag_name, current_version);
+
+    Ok(UpdateInfo {
+        available,
+        latest_version: tag_name.strip_prefix('v').unwrap_or(&tag_name).to_string(),
+        download_url: html_url,
+    })
+}
+
 #[tauri::command]
 fn open_main_app(app: tauri::AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
@@ -131,6 +209,37 @@ pub fn run() {
             app.manage(AppState {
                 db: Mutex::new(conn),
             });
+
+            // Make the widget window immune to "Show Desktop" (Win+D / 3-finger swipe)
+            // by removing minimize box styles, setting WS_EX_TOOLWINDOW, and setting Progman as its owner (GWLP_HWNDPARENT).
+            // Setting owner (rather than parent via SetParent) keeps it as a top-level window so it remains fully interactable.
+            #[cfg(target_os = "windows")]
+            {
+                use windows_sys::Win32::UI::WindowsAndMessaging::{
+                    FindWindowW, SetWindowLongPtrW, GetWindowLongPtrW,
+                    GWL_STYLE, GWL_EXSTYLE, GWLP_HWNDPARENT,
+                    WS_MINIMIZEBOX, WS_MAXIMIZEBOX, WS_EX_TOOLWINDOW, WS_EX_APPWINDOW,
+                };
+
+                if let Some(widget_window) = app.get_webview_window("widget") {
+                    let hwnd = widget_window.hwnd().unwrap().0 as isize;
+                    unsafe {
+                        let style = GetWindowLongPtrW(hwnd as _, GWL_STYLE);
+                        let new_style = style & !(WS_MINIMIZEBOX as isize) & !(WS_MAXIMIZEBOX as isize);
+                        SetWindowLongPtrW(hwnd as _, GWL_STYLE, new_style);
+
+                        let ex_style = GetWindowLongPtrW(hwnd as _, GWL_EXSTYLE);
+                        let new_ex_style = (ex_style & !(WS_EX_APPWINDOW as isize)) | (WS_EX_TOOLWINDOW as isize);
+                        SetWindowLongPtrW(hwnd as _, GWL_EXSTYLE, new_ex_style);
+
+                        let progman_name: Vec<u16> = "Progman".encode_utf16().chain(std::iter::once(0)).collect();
+                        let progman = FindWindowW(progman_name.as_ptr(), std::ptr::null());
+                        if !progman.is_null() {
+                            SetWindowLongPtrW(hwnd as _, GWLP_HWNDPARENT, progman as isize);
+                        }
+                    }
+                }
+            }
 
             let args: Vec<String> = std::env::args().collect();
             let is_autostart = args.iter().any(|arg| arg == "--autostart");
@@ -183,7 +292,7 @@ pub fn run() {
                 api.prevent_close();
             }
         })
-        .invoke_handler(tauri::generate_handler![fetch_contests, get_cached_contests, open_main_app, get_api_config, save_api_config, get_available_platforms])
+        .invoke_handler(tauri::generate_handler![fetch_contests, get_cached_contests, open_main_app, get_api_config, save_api_config, get_available_platforms, check_for_updates])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
