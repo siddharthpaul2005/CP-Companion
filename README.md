@@ -17,8 +17,8 @@ The application is built using the **Tauri framework**, combining a high-perform
 The architecture is designed to minimize external API calls (preventing rate limiting) while keeping multiple windows (Main App, Desktop Widget) perfectly synchronized.
 
 1. **State & Synchronization Strategy**:
-   - The **Main Window** is responsible for initiating external network requests to the Clist API. When it fetches new contests, the Rust backend immediately caches these results into a local SQLite database stored in the OS's AppData directory.
-   - The **Rainmeter Widget Window** operates independently. Instead of making redundant external API requests, it periodically polls the local SQLite cache (every 5 seconds) via Tauri IPC. This ensures the widget always displays up-to-date information without hitting the Clist API rate limits or creating race conditions.
+   - The **Main Window** periodically triggers auto-sync (every 5 minutes) to fetch external network requests from a dedicated proxy backend. When it fetches new contests, the Rust backend immediately caches these results into a local SQLite database stored in the OS's AppData directory.
+   - The **Rainmeter Widget Window** operates independently. Instead of making redundant external API requests, it listens for Tauri IPC events and periodically polls the local SQLite cache (every 5 seconds). This ensures perfectly synchronized views across multiple windows without creating race conditions.
 
 2. **Window Management**:
    - The application manages multiple Tauri Webview Windows (`main` and `widget`). 
@@ -33,10 +33,10 @@ The architecture is designed to minimize external API calls (preventing rate lim
 
 ### 1. Frontend (`/src`)
 
-- **`App.tsx`**: The main routing and layout component. It handles the window detection logic and renders either the Main App (with Calendar, List, and Settings views) or the Desktop Widget.
-- **`stores/useContestStore.ts`**: Global state management powered by Zustand. It orchestrates the Tauri IPC calls (`invoke("fetch_contests")`) to the Rust backend and handles API key missing errors gracefully by prompting the user to configure settings.
+- **`App.tsx`**: The main routing and layout component. It handles window detection logic, orchestrates background auto-syncs (every 5 minutes), and ensures cross-window theme synchronization.
+- **`stores/useContestStore.ts`**: Global state management powered by Zustand. It orchestrates the Tauri IPC calls to fetch and load cached contests from the Rust backend.
 - **`components/`**:
-  - `RainmeterWidget.tsx`: The borderless, draggable overlay. Features a custom 1-second interval hook for the live countdown timer, and a 5-second polling mechanism to sync with the SQLite cache.
+  - `RainmeterWidget.tsx`: The borderless, draggable overlay. Features a custom 1-second interval hook for the live countdown timer, and listens for both IPC events and local SQLite cache polling to stay in sync.
   - `WidgetView.tsx` & `ContestCard.tsx`: Standard list view of upcoming contests.
   - `CalendarView.tsx`: A grid-based calendar visualization of the contest schedule.
 
@@ -47,17 +47,16 @@ The architecture is designed to minimize external API calls (preventing rate lim
   - Bootstraps the SQLite database and injects the connection pool into Tauri's managed state (`AppState`).
   - Registers the System Tray menu and defines its event handlers.
   - Exposes Tauri Commands (IPC endpoints) to the frontend: `fetch_contests`, `get_cached_contests`, `get_api_config`, `save_api_config`, and `open_main_app`.
-- **`clist.rs`**: Handles external network communication. Uses the `reqwest` crate to query the Clist API (`https://clist.by/api/v4/contest/`), parses the JSON response using `serde`, and normalizes datetime formats.
+- **`clist.rs`**: Handles external network communication. Uses the `reqwest` crate to query a custom proxy API, fetches available platforms dynamically, parses the JSON response using `serde`, and normalizes datetime formats.
 - **`database.rs`**: The persistence layer. Uses `rusqlite` to manage the local `cp_companion.db`. 
-  - Maintains two tables: `contests` (caching contest metadata) and `app_config` (securely storing the Clist username and API key locally).
-  - Handles the `INSERT OR REPLACE` logic to update the cache when new data arrives from Clist.
+  - Maintains two tables: `contests` (caching contest metadata) and `app_settings` (storing user preferences like preferred platforms and UI theme).
+  - Handles replacing cache content and updating local settings securely.
 
 ## 🚀 Getting Started
 
 ### Prerequisites
 - Node.js (v18+)
 - Rust (latest stable)
-- A Clist API Key (Generate one at [clist.by/api/v4/doc/](https://clist.by/api/v4/doc/))
 
 ### Installation & Development
 
@@ -78,32 +77,14 @@ The architecture is designed to minimize external API calls (preventing rate lim
    ```
    *This generates the optimized release binary and installer for your OS.*
 
-## ⚙️ API Configuration
+## ⚙️ Configuration
 
-To pull live contest data, CP Companion requires a free API key from Clist.by. Follow these steps to configure your application:
+CP Companion requires no complicated API keys or setups. The application automatically fetches live contest data through a dedicated proxy server. 
 
-### Step 1: Create a Clist.by Account
-> [!IMPORTANT]
-> You must have a registered account on Clist.by to generate an API key.
-
-1. Navigate to [clist.by](https://clist.by/) in your web browser.
-2. Click on **Register** and create a free account.
-
-### Step 2: Retrieve your API Credentials
-> [!TIP]
-> Your API key is like a password. Keep it secure and do not share it with others!
-
-1. Log into your newly created Clist account.
-2. Click on your profile username in the top right corner of the website.
-3. Navigate to the **API** tab (or visit [clist.by/api/v4/doc/](https://clist.by/api/v4/doc/) directly).
-4. Locate and copy both your **Username** and your **API Key**.
-
-### Step 3: Configure CP Companion
+### Customizing your experience:
 1. Launch the **CP Companion** desktop application.
 2. Click on the **Settings** (gear icon) located in the main navigation bar.
-3. Scroll down to the **Clist API Settings** section.
-4. Paste your copied **Username** and **API Key** into the respective input fields.
-5. *(Optional)* Select your preferred competitive programming platforms (e.g., Codeforces, LeetCode, AtCoder) from the list below.
-6. Click the **Save** button.
+3. Adjust your preferred application theme (System/Light/Dark) and Autostart preferences.
+4. Select your preferred competitive programming platforms (e.g., Codeforces, LeetCode, AtCoder, GeeksforGeeks) from the dynamic list.
 
-🎉 **You're all set!** The application will immediately authenticate and fetch the upcoming contests for your selected platforms.
+🎉 **You're all set!** The application will save your preferences automatically and fetch the upcoming contests for your selected platforms, keeping them seamlessly synchronized with the desktop widget.
